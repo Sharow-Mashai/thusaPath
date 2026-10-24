@@ -5,5 +5,6 @@ import './styles.css'
 import './map.css'
 import './cv.css'
 import './goals.css'
+import './safety.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(<React.StrictMode><App /></React.StrictMode>)

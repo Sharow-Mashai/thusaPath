@@ -31,9 +31,19 @@ create table if not exists public.opportunities (
   longitude double precision not null,
   screened boolean not null default false,
   reports integer not null default 0 check (reports >= 0),
+  source_name text not null default 'ThusaPath',
+  source_url text,
+  application_url text,
+  source_checked_at timestamptz,
   status text not null default 'draft' check (status in ('draft','pending_review','published','paused','closed')),
   created_at timestamptz not null default now()
 );
+
+-- Keep source provenance when applying this schema to an existing project.
+alter table public.opportunities add column if not exists source_name text not null default 'ThusaPath';
+alter table public.opportunities add column if not exists source_url text;
+alter table public.opportunities add column if not exists application_url text;
+alter table public.opportunities add column if not exists source_checked_at timestamptz;
 
 alter table public.organisations enable row level security;
 alter table public.opportunities enable row level security;
