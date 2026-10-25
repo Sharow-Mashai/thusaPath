@@ -89,6 +89,111 @@ async function loadGovernmentCircular(): Promise<Record<string, unknown> | null>
   return null
 }
 
+const yubhubCategories = ['graduate-jobs', 'internships', 'retail', 'operations', 'hospitality', 'customer-service', 'healthcare', 'manufacturing', 'logistics']
+
+function object(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+function schemaText(value: unknown, fallback = ''): string {
+  if (typeof value === 'string') return value.trim() || fallback
+  if (Array.isArray(value)) return value.map(item => schemaText(item)).filter(Boolean).join(', ') || fallback
+  const record = object(value)
+  return text(record.name ?? record['@id'], fallback)
+}
+
+function getCountry(job: Record<string, unknown>): string {
+  const places = Array.isArray(job.jobLocation) ? job.jobLocation : [job.jobLocation]
+  const countries = places.map(place => {
+    const address = object(object(place).address)
+    return schemaText(address.addressCountry ?? object(place).addressCountry)
+  }).filter(Boolean)
+  const applicant = object(job.applicantLocationRequirements)
+  if (applicant.name) countries.push(schemaText(applicant.name))
+  return countries.join(' ').toLowerCase()
+}
+
+function southAfricanPlace(job: Record<string, unknown>): string {
+  const places = Array.isArray(job.jobLocation) ? job.jobLocation : [job.jobLocation]
+  const place = object(places.find(item => getCountry({ ...job, jobLocation: item }).includes('south africa')) ?? places[0])
+  const address = object(place.address)
+  const name = [address.addressLocality, address.addressRegion, address.addressCountry]
+    .map(value => schemaText(value)).filter(Boolean).join(', ')
+  if (name) return name
+  return /remote/i.test(`${schemaText(job.jobLocationType)} ${schemaText(job.title)}`) ? 'Remote · South Africa' : 'South Africa'
+}
+
+function salaryText(job: Record<string, unknown>): string {
+  const salary = object(job.baseSalary)
+  const value = object(salary.value)
+  const currency = text(salary.currency, 'ZAR')
+  const min = value.minValue ?? value.value
+  const max = value.maxValue
+  if (typeof min !== 'number' && typeof max !== 'number') return 'Pay details in full advert'
+  const format = (amount: unknown) => typeof amount === 'number' ? `${currency} ${amount.toLocaleString('en-ZA')}` : '?'
+  return typeof max === 'number' && max !== min ? `${format(min)} – ${format(max)}` : format(min ?? max)
+}
+
+function yubhubListing(raw: unknown): Record<string, unknown> | null {
+  const job = object(raw)
+  const title = text(job.title)
+  const applicationUrl = text(job['x-apply-url'] ?? job.url ?? job.sameAs)
+  if (!title || !/^https:\/\//i.test(applicationUrl)) return null
+  const country = getCountry(job)
+  const locationText = JSON.stringify(job.jobLocation ?? '')
+  if (!/south africa|\bza\b/i.test(country) && !/south africa|\bza\b/i.test(locationText)) return null
+  const employer = schemaText(job.hiringOrganization, 'Employer not listed')
+  const description = cleanDescription(schemaText(job.description))
+  const advertDetails = extractAdvertDetails(description)
+  const requiredSkills = Array.isArray(job['x-skills-required']) ? job['x-skills-required'].map((skill: unknown) => text(skill)).filter(Boolean) : []
+  const identifier = object(job.identifier)
+  const id = text(identifier.value ?? job.identifier, applicationUrl)
+  const typeText = schemaText(job.employmentType)
+  const categoryText = `${title} ${typeText} ${description}`
+  const category = /learnership|apprentice/i.test(categoryText) ? 'Learnership'
+    : /intern(ship)?|student/i.test(categoryText) ? 'Internship'
+      : /bursary|scholarship/i.test(categoryText) ? 'Bursary'
+        : /volunteer/i.test(categoryText) ? 'Volunteering'
+          : /training|trainee|graduate/i.test(categoryText) ? 'Training' : 'Job'
+  const validThrough = text(job.validThrough)
+  const closing = validThrough ? new Date(validThrough).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' }) : 'See source'
+  const datePosted = Date.parse(text(job.datePosted))
+  if (validThrough && Date.parse(validThrough) < Date.now()) return null
+  if (datePosted && datePosted < Date.now() - 120 * 24 * 60 * 60 * 1000) return null
+  return {
+    id: `yubhub-${id}`,
+    title,
+    organisation: employer,
+    initials: employer.split(/\s+/).slice(0, 2).map(part => part[0]).join('').toUpperCase(),
+    category,
+    place: southAfricanPlace(job),
+    pay: text(job['x-salary-range']) || salaryText(job),
+    closing,
+    description,
+    requirements: advertDetails.requirements.length ? advertDetails.requirements : requiredSkills.map(label => ({ label, met: false })),
+    skills: [...new Set([...requiredSkills, ...advertDetails.skills])].slice(0, 10),
+    colour: 'mint',
+    screened: false,
+    reports: 0,
+    sourceName: 'YubHub',
+    sourceUrl: text(job.url, 'https://yubhub.co/free-job-feeds/'),
+    applicationUrl,
+    verifiedByUs: false,
+  }
+}
+
+async function loadYubhubListings(): Promise<Record<string, unknown>[]> {
+  const feeds = await Promise.allSettled(yubhubCategories.map(async category => {
+    const url = `https://feeds.yubhub.co/facet/category/${encodeURIComponent(category)}.json`
+    const response = await fetch(url, { headers: { Accept: 'application/json' } })
+    if (!response.ok) throw new Error(`YubHub feed unavailable (${response.status})`)
+    const payload = await response.json()
+    const rows = Array.isArray(payload) ? payload : Array.isArray(payload?.['@graph']) ? payload['@graph'] : Array.isArray(payload?.jobs) ? payload.jobs : []
+    return rows.map(yubhubListing).filter((job: Record<string, unknown> | null): job is Record<string, unknown> => job !== null)
+  }))
+  return feeds.flatMap(feed => feed.status === 'fulfilled' ? feed.value : [])
+}
+
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (request.method !== 'GET') return json({ error: 'Method not allowed' }, 405)
@@ -103,18 +208,23 @@ Deno.serve(async (request) => {
     if (appId && appKey) {
       // Keep searches focused. A single long query can exclude good beginner roles
       // because the advert rarely contains every search term.
-      for (const searchTerm of ['learnership', 'internship trainee', 'entry level junior']) {
+      for (const searchTerm of ['learnership', 'internship', 'entry level']) {
         const url = new URL('https://api.adzuna.com/v1/api/jobs/za/search/1')
         url.searchParams.set('app_id', appId)
         url.searchParams.set('app_key', appKey)
         url.searchParams.set('results_per_page', '20')
-        url.searchParams.set('where', 'South Africa')
         url.searchParams.set('what', searchTerm)
         url.searchParams.set('content-type', 'application/json')
         requests.push(fetch(url, { headers: { Accept: 'application/json' } }).then(async response => {
-          if (!response.ok) throw new Error('Adzuna unavailable')
+          if (!response.ok) {
+            console.warn(`Adzuna ${searchTerm} search returned HTTP ${response.status}.`)
+            throw new Error('Adzuna unavailable')
+          }
           const payload = await response.json()
-          if (!Array.isArray(payload?.results)) throw new Error('Invalid Adzuna response')
+          if (!Array.isArray(payload?.results)) {
+            console.warn(`Adzuna ${searchTerm} search returned no results list.`)
+            throw new Error('Invalid Adzuna response')
+          }
           return payload.results.map((job: Record<string, unknown>) => ({ ...job, _provider: 'Adzuna' }))
         }))
       }
@@ -131,16 +241,19 @@ Deno.serve(async (request) => {
       }))
     }
     const governmentRequest = loadGovernmentCircular()
-    const feeds = await Promise.allSettled([...requests, governmentRequest])
+    const yubhubRequest = loadYubhubListings()
+    const feeds = await Promise.allSettled([...requests, governmentRequest, yubhubRequest])
     const records = feeds.slice(0, requests.length).flatMap(result =>
       result.status === 'fulfilled' && Array.isArray(result.value) ? result.value : [])
     const circularResult = feeds[requests.length]
     const governmentCircular = circularResult?.status === 'fulfilled' && !Array.isArray(circularResult.value)
       ? circularResult.value
       : null
-    if (!records.length && !governmentCircular) return json({ error: 'Live job sources are temporarily unavailable.' }, 502)
+    const yubhubResult = feeds[requests.length + 1]
+    const yubhubRecords = yubhubResult?.status === 'fulfilled' && Array.isArray(yubhubResult.value) ? yubhubResult.value : []
+    if (!records.length && !governmentCircular && !yubhubRecords.length) return json({ error: 'Live job sources are temporarily unavailable.' }, 502)
 
-    const opportunities = records.map((ad: Record<string, unknown>) => {
+    const opportunities = [...records.map((ad: Record<string, unknown>) => {
       const provider = text(ad._provider, 'Job board')
       const fromJooble = provider === 'Jooble'
       const company = ad.company as Record<string, unknown> | undefined
@@ -187,7 +300,7 @@ Deno.serve(async (request) => {
         verifiedByUs: false,
         sourceCategory: text(category?.label),
       }
-    })
+    }), ...yubhubRecords]
 
     const unique = new Map<string, Record<string, unknown>>()
     for (const opportunity of [...opportunities, ...(governmentCircular ? [governmentCircular] : [])]) {

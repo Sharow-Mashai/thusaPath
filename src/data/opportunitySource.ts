@@ -34,6 +34,22 @@ export async function loadOpportunities(): Promise<{ opportunities: Opportunity[
     let externalStatus: OpportunityLoadStatus | undefined
     if (import.meta.env.VITE_ADZUNA_ENABLED === 'true' || import.meta.env.VITE_EXTERNAL_LISTINGS_ENABLED === 'true') {
       try {
+        const feed = await fetch(`${url}/functions/v1/jsearch-opportunities`, {
+          headers: { apikey: key, Authorization: `Bearer ${key}` },
+        })
+        if (feed.ok) {
+          const body = await feed.json() as { opportunities?: Opportunity[] }
+          if (Array.isArray(body.opportunities)) externalListings = [...externalListings, ...body.opportunities]
+          else externalStatus = 'error'
+        } else {
+          externalStatus = feed.status === 503 ? 'unconfigured' : 'error'
+          console.warn('Additional South African listings are not available right now.')
+        }
+      } catch (error) {
+        externalStatus = 'error'
+        console.warn('Could not load additional opportunity listings.', error)
+      }
+      try {
         const feed = await fetch(`${url}/functions/v1/adzuna-opportunities`, {
           headers: { apikey: key, Authorization: `Bearer ${key}` },
         })
@@ -48,6 +64,22 @@ export async function loadOpportunities(): Promise<{ opportunities: Opportunity[
       } catch (error) {
         externalStatus = 'error'
         console.warn('Could not load external opportunity listings.', error)
+      }
+      try {
+        const feed = await fetch(`${url}/functions/v1/yubhub-opportunities`, {
+          headers: { apikey: key, Authorization: `Bearer ${key}` },
+        })
+        if (feed.ok) {
+          const body = await feed.json() as { opportunities?: Opportunity[] }
+          if (Array.isArray(body.opportunities)) externalListings = [...externalListings, ...body.opportunities]
+          else externalStatus = 'error'
+        } else {
+          externalStatus = feed.status === 503 ? 'unconfigured' : 'error'
+          console.warn('YubHub listings are not available right now.')
+        }
+      } catch (error) {
+        externalStatus = 'error'
+        console.warn('Could not load YubHub opportunity listings.', error)
       }
     }
     const opportunities = [...verifiedListings, ...externalListings]
