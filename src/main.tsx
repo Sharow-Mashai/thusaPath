@@ -6,5 +6,6 @@ import './map.css'
 import './cv.css'
 import './goals.css'
 import './safety.css'
+import './admin.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(<React.StrictMode><App /></React.StrictMode>)

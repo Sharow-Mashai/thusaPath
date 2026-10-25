@@ -1,6 +1,20 @@
 -- ThusaPath opportunity catalogue. Enable RLS before adding any user-linked data.
 create extension if not exists pgcrypto;
 
+-- Staff access is provisioned by a project owner after creating a staff Auth user.
+create table if not exists public.admin_users (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+alter table public.admin_users enable row level security;
+revoke all on public.admin_users from anon, public;
+grant select on public.admin_users to authenticated;
+drop policy if exists "Staff can check their own admin access" on public.admin_users;
+create policy "Staff can check their own admin access"
+  on public.admin_users for select to authenticated
+  using (user_id = (select auth.uid()) and active = true);
+
 create table if not exists public.organisations (
   id uuid primary key default gen_random_uuid(),
   name text not null,
@@ -67,6 +81,7 @@ grant execute on function public.is_currently_verified_org(uuid) to anon, authen
 create policy "Visitors can read active verified opportunities"
   on public.opportunities for select to anon, authenticated
   using (status = 'published' and public.is_currently_verified_org(organisation_id));
+grant select on public.opportunities to anon, authenticated;
 
 -- No public reads of organisation registration documents or private details.
 create policy "Organisation details are not public"

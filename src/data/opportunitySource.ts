@@ -11,11 +11,11 @@ type OpportunityRow = {
 /** Loads only published listings from the configured Supabase project. */
 export async function loadOpportunities(): Promise<{ opportunities: Opportunity[]; status: OpportunityLoadStatus }> {
   const url = import.meta.env.VITE_SUPABASE_URL?.trim().replace(/\/$/, '')
-  const key = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim()
+  const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY?.trim() || import.meta.env.VITE_SUPABASE_ANON_KEY?.trim()
   if (!url || !key) return { opportunities: [], status: 'unconfigured' }
   try {
     const response = await fetch(`${url}/rest/v1/opportunities?select=*&status=eq.published&order=closing.asc`, {
-      headers: { apikey: key, Authorization: `Bearer ${key}` },
+      headers: { apikey: key },
     })
     if (!response.ok) return { opportunities: [], status: 'error' }
     const rows = await response.json() as OpportunityRow[]
@@ -32,7 +32,7 @@ export async function loadOpportunities(): Promise<{ opportunities: Opportunity[
       }))
     let externalListings: Opportunity[] = []
     let externalStatus: OpportunityLoadStatus | undefined
-    if (import.meta.env.VITE_ADZUNA_ENABLED === 'true') {
+    if (import.meta.env.VITE_ADZUNA_ENABLED === 'true' || import.meta.env.VITE_EXTERNAL_LISTINGS_ENABLED === 'true') {
       try {
         const feed = await fetch(`${url}/functions/v1/adzuna-opportunities`, {
           headers: { apikey: key, Authorization: `Bearer ${key}` },

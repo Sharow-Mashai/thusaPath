@@ -1,0 +1,5 @@
+[functions.adzuna-opportunities]
+verify_jwt = true
+
+[functions.job-safety-check]
+verify_jwt = true
