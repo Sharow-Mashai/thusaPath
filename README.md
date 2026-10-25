@@ -1,57 +1,65 @@
 # ThusaPath
 
-ThusaPath helps young people find safer work and training opportunities, understand what each role needs, and practise for interviews in their own time.
+ThusaPath helps young people find work and training opportunities, understand what each advert asks for, prepare for skill gaps, and practise for interviews. The current build is a prototype; it does not submit applications or claim that every listing is safe.
 
-## Run the app
+## Run locally
 
 1. Install Node.js.
 2. In this folder, run `npm install`.
-3. Run `npm run dev` and open the local address shown in the terminal.
+3. Copy `.env.example` to `.env` and add the Supabase project URL and publishable key.
+4. Run `npm run dev` and open the local address shown in the terminal.
 
-## Live opportunity data
+Never place a Supabase service-role key, OpenAI key, or job-board provider secret in a `VITE_` variable or in frontend code.
 
-The app reads published listings from the Supabase `opportunities` table when `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` are set in a local `.env` file. Add the table and row-level security policies with `supabase/schema.sql`. The public read policy only returns published roles from organisations with current verification. Do not put a Supabase secret or service role key in the frontend.
+## Supabase setup
 
-### First-time service setup
+The app uses Supabase Auth for job-seeker sign-in/registration and staff sign-in. Job-seeker registrations accept ordinary email addresses. Email confirmation and delivery are controlled in the Supabase project’s Auth settings. The current Supabase built-in sender is restricted; use a real SMTP provider before inviting public users to confirm accounts. For a small, controlled prototype only, an owner may turn off email confirmation in Supabase Auth so several testers can register without waiting for email. This does not verify that they own the email address; turn confirmation back on before a public launch.
 
-1. Create a project in the [Supabase dashboard](https://supabase.com/dashboard). Choose the closest available region carefully; Supabase says the project region also sets where primary data is stored and cannot be changed later without creating a new project.
-2. Copy the project URL and **publishable** key from the project’s Connect dialog. Copy `.env.example` to `.env`, then fill in `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`. This key is intended for browser use with the row-level security rules in the schema.
-3. In Supabase, open SQL Editor, paste and run `supabase/schema.sql`.
-4. Deploy `supabase/functions/adzuna-opportunities` and `supabase/config.toml`. In Edge Function Secrets, add `ADZUNA_APP_ID` and `ADZUNA_APP_KEY`. Set `VITE_ADZUNA_ENABLED=true` in `.env` and restart the app. The feed is read-only and public; provider keys stay on the server.
-5. Create the staff email mailbox for the `thusapath.com` domain, then create the matching user in Supabase Authentication. Use the SQL snippet below to grant admin access to that user. Do not put a staff password or Supabase secret key in `.env` or in a chat.
+For a new database, run `supabase/schema.sql` in the Supabase SQL Editor. For an existing project that already has the base schema, run `supabase/migrations/20261025_trust_review.sql`. This adds the staff verification and report-review workflow, its access policies, and the review function. Keep email confirmation enabled when real users rely on account ownership.
 
-There is no sample-listing fallback. Without Supabase settings, opportunity pages show that there are no current opportunities. Only add opportunities from real organisations after verifying them, and publish them through your review process.
-
-### Staff sign-in and listing admin
-
-Staff use the same ThusaPath app through **Staff sign in** in the footer. Authentication requires a Supabase Auth account whose email ends in `@thusapath.com` and an active row in `public.admin_users`; the email domain alone does not grant access. Create staff accounts in Supabase Auth, then add approved account IDs from the SQL editor, for example:
+Staff must use an account whose email ends with `@thusapath.com` and whose user ID has an active row in `public.admin_users`. The domain alone does not grant staff access. An owner can provision staff with:
 
 ```sql
 insert into public.admin_users (user_id)
 select id from auth.users where email = 'staff@thusapath.com';
 ```
 
-Run the admin table setup from `supabase/schema.sql` first. The admin page can inspect and refresh the current listing feed. API keys stay in Supabase Edge Function secrets and are never collected by the browser. Adding/removing staff rows is owner-only. A connected provider is shown as **source verified**; this confirms where the listing came from, not that ThusaPath verified the employer or every advert detail.
+## Live opportunity feeds
 
-### External listings
+Published ThusaPath listings are read from `public.opportunities`. Public database policies only return listings linked to an organisation with a current verified status. The app also supports the external feeds described in [the live-listing and safety setup](supabase/LIVE-LISTINGS-AND-SAFETY-SETUP.md). Enable the configured feeds with `VITE_EXTERNAL_LISTINGS_ENABLED=true` in `.env`, then restart the app. `VITE_ADZUNA_ENABLED=true` remains supported for older local setups.
 
-The app includes a server-side Adzuna connector in `supabase/functions/adzuna-opportunities`. It fetches South African adverts from the Adzuna API, preserves the original apply link, and marks the provider as verified while making clear that ThusaPath has not independently verified the employer or the advert itself. Adzuna’s API terms require an Adzuna attribution link on each displayed listing. API credentials belong in Supabase Function secrets, never in `.env` variables prefixed with `VITE_`.
+A job-board API being the source of an advert does **not** mean ThusaPath verified the employer. External listings are shown as source listings, and the user-facing safety panel says they were not independently checked. Follow each provider’s attribution and licensing terms; Adzuna’s current terms, in particular, must be checked before use beyond evaluation.
 
-To enable it, register with [Adzuna’s developer portal](https://developer.adzuna.com/), review its current API terms, and confirm the project’s intended use is allowed. The current terms describe the free key as evaluation use, allow a 14-day usability/coverage trial for organisations, and require a licence for ongoing use in a revenue- or lead-generating product. Then deploy the Edge Function and set `ADZUNA_APP_ID` and `ADZUNA_APP_KEY` as Supabase Function secrets. Set `VITE_ADZUNA_ENABLED=true` in `.env` and restart the app. If this app will continue beyond an evaluation, obtain written permission or a licence first.
+## Trust and employer checks
 
-[SA Youth’s developer portal](https://developers.sayouth.org.za/) offers partner APIs for youth opportunity/recruitment workflows. Access requires a Partner Network account, agreement to its API terms, and sandbox credentials before production credentials. The portal describes creating and sharing opportunities; confirm with SA Youth whether its available endpoints fit ThusaPath’s intended listing discovery before building that connector. Do not scrape SA Youth.
+Staff can add an organisation to the review list in **Listing sources → Employer checks and user reports**. Before marking it verified, a staff member must check an official record and a separate contact channel, record the method and a short evidence summary, and set a review expiry date. The app stores review events and who recorded them. Do not paste identity numbers or confidential document contents into review notes.
 
-The [DPSA vacancy circular](https://www.dpsa.gov.za/newsroom/psvc/) is an official weekly source for public service vacancies, but we have not found a supported public jobs API. For now, link users to the circular rather than scraping or copying its PDF listings into the app.
+Job seekers see the recorded verification method, review date, and expiry date for verified employers. A ThusaPath employer check covers the organisation details reviewed; it does not guarantee a particular vacancy, hiring outcome, or safe interaction. External source data is clearly distinguished from a ThusaPath check.
 
-## What works in this prototype
+Signed-in job seekers can report a listing concern. Reports are associated with the reporting account and appear in the staff review queue after the trust-review migration is applied. The report form tells users not to include identity or banking details. Staff must review reports and record a resolution; an automated safety result does not replace that work.
 
-- Search, filter, save and view opportunities on a map or in a list.
-- Read each role’s requirements, estimated transport cost and safety information.
-- Report a concern from the listing’s safety check; reports stay on this device until a secure reporting service is connected.
-- Build a simple profile, practise a short skills activity and save progress on this device.
-- Set personal goals, optionally link them to an opportunity, and track finished goals.
-- Practise interview questions and get sample guidance made from the profile details.
-- Build, copy and save a CV with either of two layouts, then print it or save it as a PDF.
-- Sign in to a staff-only listing feed status and refresh page.
+## Skills and interview preparation
 
-Profile, saved roles, applications and practice history are stored in this browser only. The app does not create job-seeker accounts, submit applications, upload documents, verify organisations, send information to employers, or call an AI service. Staff sign-in requires the separate Supabase setup above. The practice coach uses a fixed question bank and simple sample-answer templates. Connect these flows to authenticated Supabase policies and a server-side API before using real personal information or real opportunities.
+The opportunity detail view extracts skills and requirements from the advert text when those details are available, then compares them with the user’s profile. This is a text-based estimate, not an eligibility decision. Missing from a profile does not mean a person cannot apply. When an advert lacks useful detail, the app says so instead of inventing requirements.
+
+“My Path” connects an opportunity to a short practice activity based on a skill mentioned in that advert, followed by interview practice. Interview prompts and tips are currently rule-based and stored locally; they are not generated by AI and do not predict whether someone will be hired. The scam check is the AI feature: it checks the supplied advert details and application-site host for warning signs, does not receive the user’s profile, and cannot prove an employer is legitimate.
+
+## Personal information and current limits
+
+A signed-in user’s profile, saved listings, goals, CVs, and practice history are stored in this browser under a key scoped to that Supabase user ID. They are not synced across devices or sent to employers. They remain on the device between sign-ins to the same account, so users should sign out on shared devices. CV contact details are stored in browser storage and should be treated as private local data.
+
+Applying opens the employer’s application page. ThusaPath does not submit the application, upload the user’s CV, or report the application outcome. The user can save an interest locally, but that is not a confirmed application.
+
+## Business model and pilot measures
+
+Core job-seeker access should remain free. Possible paying customers are legitimate employers, recruitment partners, and organisations sponsoring employability programmes. Their proposed value is access to a clearer, more relevant candidate pipeline, reduced initial screening effort, and programme-level reports on participation and readiness. These are hypotheses to validate with partners; no paid employer service, partner agreement, traction, or employment outcome is currently implemented or demonstrated.
+
+A pilot should track consent-based, aggregate measures such as users who complete a profile, finish a skill activity, practise an interview answer, open an application link, and later report an interview or job outcome. Do not present these as results until they are actually collected and measured.
+
+## Known prototype limitations
+
+- Requirements and profile matching use text extraction and simple matching; they can miss context or misread an advert.
+- External feeds can be incomplete, stale, or unavailable. Check the original advert before applying.
+- Safety Check identifies warning signs only. “No clear warning signs” is not a safety approval.
+- User reports need staff follow-up; verification and moderation depend on real human checks.
+- No employer subscription, recruitment partnership, sponsored programme, analytics dashboard, or job-outcome tracking is live yet.

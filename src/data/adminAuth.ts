@@ -10,7 +10,11 @@ function getConfig() {
 async function errorMessage(response: Response) {
   try {
     const body = await response.json() as { message?: string; msg?: string; error_description?: string }
-    return body.error_description || body.message || body.msg || 'Please check your details and try again.'
+    const detail = body.error_description || body.message || body.msg || ''
+    if (/email.*rate limit|rate limit.*email|over_email_send_rate_limit/i.test(detail)) {
+      return 'Too many confirmation emails have been requested. Please wait before trying again, and check your inbox in case your account was already created.'
+    }
+    return detail || 'Please check your details and try again.'
   } catch { return 'Please check your details and try again.' }
 }
 

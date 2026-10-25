@@ -6,6 +6,7 @@ type OpportunityRow = {
   requirements: Opportunity['requirements']; skills: string[]; colour: string; verified_until: string
   screened: boolean; reports: number; latitude: number | null; longitude: number | null
   source_name?: string; source_url?: string | null; application_url?: string | null
+  organisations?: { id: string; name: string; status: string; verified_until: string | null; verification_method: string | null; verified_at: string | null } | null
 }
 
 /** Loads only published listings from the configured Supabase project. */
@@ -14,9 +15,14 @@ export async function loadOpportunities(): Promise<{ opportunities: Opportunity[
   const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY?.trim() || import.meta.env.VITE_SUPABASE_ANON_KEY?.trim()
   if (!url || !key) return { opportunities: [], status: 'unconfigured' }
   try {
-    const response = await fetch(`${url}/rest/v1/opportunities?select=*&status=eq.published&order=closing.asc`, {
+    let response = await fetch(`${url}/rest/v1/opportunities?select=*,organisations(id,name,status,verified_until,verification_method,verified_at)&status=eq.published&order=closing.asc`, {
       headers: { apikey: key },
     })
+    let verificationDetailsAvailable = response.ok
+    if (!response.ok) {
+      response = await fetch(`${url}/rest/v1/opportunities?select=*&status=eq.published&order=closing.asc`, { headers: { apikey: key } })
+      verificationDetailsAvailable = false
+    }
     if (!response.ok) return { opportunities: [], status: 'error' }
     const rows = await response.json() as OpportunityRow[]
     if (!Array.isArray(rows)) return { opportunities: [], status: 'error' }
@@ -25,10 +31,17 @@ export async function loadOpportunities(): Promise<{ opportunities: Opportunity[
         category: row.category, place: row.place, distance: row.distance_km,
         transport: row.transport_estimate, pay: row.pay, closing: row.closing,
         description: row.description, requirements: row.requirements, skills: row.skills,
-        colour: row.colour, verifiedUntil: row.verified_until, screened: row.screened,
+        colour: row.colour, verifiedUntil: row.organisations?.verified_until || undefined,
+        verifiedAt: row.organisations?.verified_at || undefined,
+        verificationMethod: row.organisations?.verification_method || undefined,
+        screened: row.screened,
         reports: row.reports, coordinates: row.latitude !== null && row.longitude !== null ? [row.latitude, row.longitude] as [number, number] : undefined,
         sourceName: row.source_name || 'ThusaPath', sourceUrl: row.source_url || undefined,
-        applicationUrl: row.application_url || undefined, verifiedByUs: true,
+        applicationUrl: row.application_url || undefined,
+        verifiedByUs: verificationDetailsAvailable && row.organisations?.status === 'verified' && Boolean(row.organisations.verified_until && row.organisations.verified_until >= new Date().toISOString().slice(0, 10)),
+        verificationStatus: verificationDetailsAvailable
+          ? row.organisations?.status === 'verified' && Boolean(row.organisations.verified_until && row.organisations.verified_until >= new Date().toISOString().slice(0, 10)) ? 'verified' as const : 'unavailable' as const
+          : 'unavailable' as const,
       }))
     let externalListings: Opportunity[] = []
     let externalStatus: OpportunityLoadStatus | undefined
