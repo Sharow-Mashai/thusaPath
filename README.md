@@ -17,12 +17,15 @@ The app uses Supabase Auth for job-seeker sign-in/registration and staff sign-in
 
 For a new database, run `supabase/schema.sql` in the Supabase SQL Editor. For an existing project that already has the base schema, run `supabase/migrations/20261025_trust_review.sql`. This adds the staff verification and report-review workflow, its access policies, and the review function. Keep email confirmation enabled when real users rely on account ownership.
 
-Staff must use an account whose email ends with `@thusapath.com` and whose user ID has an active row in `public.admin_users`. The domain alone does not grant staff access. An owner can provision staff with:
+Staff access is based on an active row in `public.admin_users`, not on an email suffix. An owner can provision the first staff admin after that person already has a Supabase Auth account:
 
 ```sql
-insert into public.admin_users (user_id)
-select id from auth.users where email = 'staff@thusapath.com';
+insert into public.admin_users (user_id, active)
+select id, true from auth.users where lower(email) = lower('your-existing-email@example.com')
+on conflict (user_id) do update set active = true;
 ```
+
+To manage staff inside the app, run `supabase/migrations/20261025_staff_access_management.sql` in the Supabase SQL Editor. Existing Auth accounts on any email domain can be added by an active staff member in **Staff workspace → Staff access**. The staff-access migration checks the caller and only grants access to an account that already exists; it does not create or confirm accounts. If the earlier domain-only staff migration was already run, also run `supabase/migrations/20261026_staff_access_any_email.sql` to remove its email-domain restriction.
 
 ## Live opportunity feeds
 

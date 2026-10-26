@@ -14,6 +14,9 @@ async function errorMessage(response: Response) {
     if (/email.*rate limit|rate limit.*email|over_email_send_rate_limit/i.test(detail)) {
       return 'Too many confirmation emails have been requested. Please wait before trying again, and check your inbox in case your account was already created.'
     }
+    if (/email_address_invalid|email address.*is invalid/i.test(detail)) {
+      return 'Supabase rejected this email address. Check the spelling and use an email account that already exists and can receive messages.'
+    }
     return detail || 'Please check your details and try again.'
   } catch { return 'Please check your details and try again.' }
 }
@@ -36,13 +39,11 @@ function normalizedEmail(emailInput: string) {
 
 export async function signInJobSeeker(emailInput: string, password: string): Promise<AdminSession> {
   const email = normalizedEmail(emailInput)
-  if (email.endsWith('@thusapath.com')) throw new Error('ThusaPath staff should use the same sign-in page with their staff email.')
   return passwordSignIn(email, password)
 }
 
 export async function signUpJobSeeker(emailInput: string, password: string, firstName: string, lastName: string): Promise<{ session?: AdminSession; confirmationRequired: boolean }> {
   const email = normalizedEmail(emailInput)
-  if (email.endsWith('@thusapath.com')) throw new Error('Staff accounts are created by the ThusaPath admin. Use the sign-in tab instead.')
   const { url, key } = getConfig()
   const response = await fetch(`${url}/auth/v1/signup`, {
     method: 'POST', headers: { apikey: key, 'Content-Type': 'application/json' },
@@ -59,9 +60,8 @@ export async function signUpJobSeeker(emailInput: string, password: string, firs
   return { confirmationRequired: true }
 }
 
-export async function signInAdmin(emailInput: string, password: string): Promise<AdminSession> {
+export async function signInAccount(emailInput: string, password: string): Promise<{ session: AdminSession; isStaff: boolean }> {
   const email = normalizedEmail(emailInput)
-  if (!email.endsWith('@thusapath.com')) throw new Error('Use your ThusaPath staff email, ending in @thusapath.com.')
   const auth = await passwordSignIn(email, password)
   const { url, key } = getConfig()
   const userId = auth.userId
@@ -71,7 +71,5 @@ export async function signInAdmin(emailInput: string, password: string): Promise
   })
   if (!membership.ok) throw new Error('We could not check staff access. Ask the ThusaPath admin to finish the setup.')
   const rows = await membership.json() as { user_id: string }[]
-  if (!rows.some(row => row.user_id === userId)) throw new Error('This account does not have admin access yet. Ask the ThusaPath admin to add you.')
-
-  return auth
+  return { session: auth, isStaff: rows.some(row => row.user_id === userId) }
 }
