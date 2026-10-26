@@ -9,6 +9,43 @@ const skillVocabulary = [
 
 const normalise = (value: string) => value.toLocaleLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
 
+export function isNearLocation(place: string, profileLocation: string): boolean {
+  const generalAreas = new Set(['south africa', 'rsa', 'remote', 'anywhere'])
+  const areas = profileLocation.split(/[,;/]/).map(normalise).filter(area => area.length > 1 && !generalAreas.has(area))
+  const listingPlace = normalise(place)
+  return Boolean(listingPlace && areas.some(area => listingPlace.includes(area)))
+}
+
+export type DeviceCoordinates = [number, number]
+export const NEARBY_RADIUS_KM = 50
+
+export function distanceInKm(from: DeviceCoordinates, to: DeviceCoordinates): number {
+  const radians = (degrees: number) => degrees * Math.PI / 180
+  const [lat1, lon1] = from.map(radians)
+  const [lat2, lon2] = to.map(radians)
+  const deltaLat = lat2 - lat1
+  const deltaLon = lon2 - lon1
+  const haversine = Math.sin(deltaLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLon / 2) ** 2
+  return 6371 * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine))
+}
+
+export function isNearbyOpportunity(item: Opportunity, deviceLocation: DeviceCoordinates | null, profileLocation: string): boolean {
+  if (deviceLocation) return item.coordinates ? distanceInKm(deviceLocation, item.coordinates) <= NEARBY_RADIUS_KM : false
+  return isNearLocation(item.place, profileLocation)
+}
+
+export function sortByProximity<T extends Opportunity>(items: T[], deviceLocation: DeviceCoordinates | null, profileLocation: string, tieBreaker: (a: T, b: T) => number = () => 0): T[] {
+  return [...items].sort((a, b) => {
+    if (deviceLocation) {
+      const distanceA = a.coordinates ? distanceInKm(deviceLocation, a.coordinates) : Number.POSITIVE_INFINITY
+      const distanceB = b.coordinates ? distanceInKm(deviceLocation, b.coordinates) : Number.POSITIVE_INFINITY
+      if (distanceA !== distanceB) return distanceA - distanceB
+    }
+    const areaOrder = Number(isNearLocation(b.place, profileLocation)) - Number(isNearLocation(a.place, profileLocation))
+    return areaOrder || tieBreaker(a, b)
+  })
+}
+
 function profileTerms(profile: { skills: string[]; education: string }): string[] {
   const education = normalise(profile.education)
   const aliases = /grade 12|matric/.test(education) ? ['grade 12', 'matric'] : []
